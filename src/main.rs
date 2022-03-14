@@ -1,38 +1,18 @@
 use std::collections::{HashMap, HashSet};
 use std::default::Default;
-use std::io::Read;
 use std::sync::Arc;
 
-use futures::stream::StreamExt;
 use serenity::async_trait;
-use serenity::builder::CreateApplicationCommandOption;
-use serenity::client::bridge::gateway::event::ShardStageUpdateEvent;
 use serenity::client::{Client, Context, EventHandler};
-use serenity::framework::standard::{
-    macros::{command, group},
-    CommandResult, StandardFramework,
-};
-use serenity::http::GuildPagination;
-use serenity::model::channel::{
-    Channel, ChannelCategory, GuildChannel, Message, PartialGuildChannel, Reaction, StageInstance,
-};
-use serenity::model::event::{
-    ChannelPinsUpdateEvent, GuildMemberUpdateEvent, GuildMembersChunkEvent, InviteCreateEvent,
-    InviteDeleteEvent, MessageUpdateEvent, PresenceUpdateEvent, ResumedEvent, ThreadListSyncEvent,
-    ThreadMembersUpdateEvent, TypingStartEvent, VoiceServerUpdateEvent,
-};
-use serenity::model::gateway::{Presence, Ready};
-use serenity::model::guild::{
-    Emoji, Guild, GuildUnavailable, Integration, Member, PartialGuild, Role, ThreadMember,
-};
-use serenity::model::id::{
-    ApplicationId, ChannelId, EmojiId, GuildId, IntegrationId, MessageId, RoleId, UserId,
-};
+use serenity::framework::standard::{macros::group, StandardFramework};
+use serenity::model::gateway::Ready;
+use serenity::model::guild::Guild;
+use serenity::model::id::{ChannelId, GuildId, UserId};
 use serenity::model::interactions::application_command::{
     ApplicationCommand, ApplicationCommandInteractionDataOptionValue, ApplicationCommandOptionType,
 };
 use serenity::model::interactions::{Interaction, InteractionResponseType};
-use serenity::model::prelude::{CurrentUser, User, VoiceState};
+use serenity::model::prelude::VoiceState;
 use serenity::prelude::{TypeMap, TypeMapKey};
 
 const DUMMY_TEAM: i64 = -1;
@@ -375,8 +355,7 @@ async fn main() {
         blessed_users: HashSet::from([UserId(352172373774041102) /* DCNick3 */]),
     });
 
-    let framework = StandardFramework::new() // set the bot's prefix to "~"
-        .group(&GENERAL_GROUP);
+    let framework = StandardFramework::new().group(&GENERAL_GROUP);
 
     // Login with a bot token from the environment
     let mut client = Client::builder(&config.token)
