@@ -9,7 +9,7 @@ use serenity::model::gateway::Ready;
 use serenity::model::guild::Guild;
 use serenity::model::id::{ChannelId, GuildId, UserId};
 use serenity::model::interactions::application_command::{
-    ApplicationCommand, ApplicationCommandInteractionDataOptionValue, ApplicationCommandOptionType,
+    ApplicationCommandInteractionDataOptionValue, ApplicationCommandOptionType,
 };
 use serenity::model::interactions::{Interaction, InteractionResponseType};
 use serenity::model::prelude::VoiceState;
@@ -156,21 +156,8 @@ impl EventHandler for Handler {
 
         // println!(
         //     "I now have the following guild slash commands: {:#?}",
-        //     commands
+        //     _commands
         // );
-
-        let guild_command =
-            ApplicationCommand::create_global_application_command(&ctx.http, |command| {
-                command
-                    .name("wonderful_command")
-                    .description("An amazing command")
-            })
-            .await;
-
-        println!(
-            "I created the following global slash command: {:#?}",
-            guild_command
-        );
     }
 
     async fn guild_create(&self, ctx: Context, guild: Guild, _is_new: bool) {
