@@ -456,7 +456,7 @@ impl EventHandler for Handler {
                     let q2 = get_queue(&config, &mut redis, 2).await;
 
                     format!(
-                        "Table 1:\n {}\n\nTable 2:\n{}",
+                        "Table 1:\n{}\n\nTable 2:\n{}",
                         format_queue(&config, &q1),
                         format_queue(&config, &q2)
                     )
@@ -528,6 +528,25 @@ impl EventHandler for Handler {
                                 "Deqeued team {} -> table {}: {} people in, {} people out, {} people failed",
                                 team_id, table_id, in_, out, err
                             )
+                        } else {
+                            format!("The queue for table {} is empty", table_id)
+                        }
+                    } else {
+                        "You should be blessed by the gods to do this".to_string()
+                    }
+                }
+                "dequeue_nojoin" => {
+                    if config.blessed_users.contains(&command.user.id) {
+                        let table_id = match command.data.options.as_slice() {
+                            [op1] => op1.clone(),
+                            _ => unreachable!(),
+                        };
+
+                        let table_id = table_id.value.unwrap().as_i64().unwrap();
+                        let team_id = dequeue(&config, &mut redis, table_id).await;
+
+                        if let Some(team_id) = team_id {
+                            format!("Deqeued team {} -> /dev/null", team_id)
                         } else {
                             format!("The queue for table {} is empty", table_id)
                         }
