@@ -7,6 +7,7 @@ use std::fmt::Write;
 use std::sync::Arc;
 
 use serenity::async_trait;
+use serenity::builder::CreateApplicationCommandOption;
 use serenity::client::{Client, Context, EventHandler};
 use serenity::framework::standard::{macros::group, StandardFramework};
 use serenity::model::gateway::Ready;
@@ -53,7 +54,11 @@ impl Config {
     }
 
     pub fn queue_name(&self, table_id: i64) -> String {
-        format!("{}_queue_{}", self.environment, table_id)
+        format!("{}:queue:{}", self.environment, table_id)
+    }
+
+    pub fn team_to_queue_name(&self) -> String {
+        format!("{}:team_to_queue", self.environment)
     }
 }
 
@@ -133,8 +138,22 @@ async fn add_to_queue(
     redis: &mut MultiplexedConnection,
     table_id: i64,
     team_id: i64,
-) {
+) -> bool {
     let queue = config.queue_name(table_id);
+    let team2queue = config.team_to_queue_name();
+
+    if redis::Cmd::hexists(&team2queue, team_id)
+        .query_async(redis)
+        .await
+        .unwrap()
+    {
+        return false;
+    }
+
+    let _: () = redis::Cmd::hset(&team2queue, team_id, table_id)
+        .query_async(redis)
+        .await
+        .unwrap();
 
     let _: () = redis::cmd("ZADD")
         .arg(queue)
@@ -144,6 +163,73 @@ async fn add_to_queue(
         .query_async(redis)
         .await
         .unwrap();
+
+    true
+}
+
+async fn add_to_smallest_queue(
+    config: &Config,
+    redis: &mut MultiplexedConnection,
+    team_id: i64,
+) -> Option<i64> {
+    let team2queue = config.team_to_queue_name();
+
+    // I see races...
+    // They are everywhere!
+    if redis::Cmd::hexists(team2queue, team_id)
+        .query_async(redis)
+        .await
+        .unwrap()
+    {
+        return None;
+    }
+
+    let queues = config.tables.keys();
+    let queues = queues.filter(|&&q| q != DUMMY_TABLE).map(|q| async {
+        let q = *q;
+        let queue_name = config.queue_name(q);
+
+        let mut redis = redis.clone();
+        let r: i64 = redis::Cmd::zcount(&queue_name, f64::NEG_INFINITY, f64::INFINITY)
+            .query_async(&mut redis)
+            .await
+            .unwrap();
+        (q, r)
+    });
+
+    let queues = futures::future::join_all(queues).await;
+
+    let (queue, _) = queues.into_iter().min_by_key(|(_, sz)| *sz).unwrap();
+
+    assert!(add_to_queue(config, redis, queue, team_id).await);
+
+    Some(queue)
+}
+
+async fn unqueue(config: &Config, redis: &mut MultiplexedConnection, team_id: i64) -> Option<i64> {
+    let team2queue = config.team_to_queue_name();
+
+    let table_id: Option<i64> = redis::Cmd::hget(&team2queue, team_id)
+        .query_async(redis)
+        .await
+        .unwrap();
+
+    if let Some(table_id) = table_id {
+        let queue = config.queue_name(table_id);
+        let _: () = redis::Cmd::zrem(&queue, team_id)
+            .query_async(redis)
+            .await
+            .unwrap();
+
+        let _: () = redis::Cmd::hdel(&team2queue, team_id)
+            .query_async(redis)
+            .await
+            .unwrap();
+
+        Some(table_id)
+    } else {
+        None
+    }
 }
 
 async fn dequeue(config: &Config, redis: &mut MultiplexedConnection, table_id: i64) -> Option<i64> {
@@ -164,6 +250,13 @@ async fn dequeue(config: &Config, redis: &mut MultiplexedConnection, table_id: i
     }
 
     let (team_id, _): (i64, f64) = from_redis_value(&result).unwrap();
+
+    let team2queue = config.team_to_queue_name();
+
+    let _: () = redis::Cmd::hdel(team2queue, team_id)
+        .query_async(redis)
+        .await
+        .unwrap();
 
     Some(team_id)
 }
@@ -210,6 +303,18 @@ impl ContextExt for TypeMap {
     }
 }
 
+fn table_option(
+    option: &mut CreateApplicationCommandOption,
+) -> &mut CreateApplicationCommandOption {
+    option
+        .name("table")
+        .description("A table id (1 or 2)")
+        .kind(ApplicationCommandOptionType::Integer)
+        .add_int_choice("Table #1", 1)
+        .add_int_choice("Table #2", 2)
+        .required(true)
+}
+
 #[async_trait]
 impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: Ready) {
@@ -230,15 +335,7 @@ impl EventHandler for Handler {
                         command
                             .name("tjoin")
                             .description("Move the team to the table")
-                            .create_option(|option| {
-                                option
-                                    .name("table")
-                                    .description("A table id (1 or 2)")
-                                    .kind(ApplicationCommandOptionType::Integer)
-                                    .add_int_choice("Table #1", 1)
-                                    .add_int_choice("Table #2", 2)
-                                    .required(true)
-                            })
+                            .create_option(table_option)
                             .create_option(|option| {
                                 option
                                     .name("team_id")
@@ -260,15 +357,7 @@ impl EventHandler for Handler {
                         command
                             .name("tkick")
                             .description("Kick the team currently at the table")
-                            .create_option(|option| {
-                                option
-                                    .name("table")
-                                    .description("A table id (1 or 2)")
-                                    .kind(ApplicationCommandOptionType::Integer)
-                                    .add_int_choice("Table #1", 1)
-                                    .add_int_choice("Table #2", 2)
-                                    .required(true)
-                            })
+                            .create_option(table_option)
                     })
                     .create_application_command(|command| {
                         command
@@ -285,7 +374,17 @@ impl EventHandler for Handler {
                     .create_application_command(|command| {
                         command
                             .name("enqueue_me")
-                            .description("Enqueue my team for the trainings please")
+                            .description("Enqueue my team for the trial runs please")
+                    })
+                    .create_application_command(|command| {
+                        command
+                            .name("enqueue_me_faster")
+                            .description("Enqueue my team, use the table with the smallest queue")
+                    })
+                    .create_application_command(|command| {
+                        command
+                            .name("unqueue_me")
+                            .description("Unqueue my team, I don't want to be called to trial runs")
                     })
                     .create_application_command(|command| {
                         command
@@ -295,15 +394,12 @@ impl EventHandler for Handler {
                     .create_application_command(|command| {
                         command.name("dequeue")
                             .description("Dequeue the team from the specified table queue & move them to the table")
-                            .create_option(|option| {
-                                option
-                                    .name("table")
-                                    .description("A table id (1 or 2)")
-                                    .kind(ApplicationCommandOptionType::Integer)
-                                    .add_int_choice("Table #1", 1)
-                                    .add_int_choice("Table #2", 2)
-                                    .required(true)
-                            })
+                            .create_option(table_option)
+                    })
+                    .create_application_command(|command| {
+                        command.name("dequeue_nojoin")
+                            .description("Dequeue the team from the specified table queue, but do NOT move them to the table")
+                            .create_option(table_option)
                     })
             })
             .await
@@ -476,13 +572,16 @@ impl EventHandler for Handler {
                             if let Some(team_id) = team_id {
                                 let table_id = config.team_table(team_id);
 
-                                add_to_queue(&config, &mut redis, table_id, team_id).await;
-                                let queue = get_queue(&config, &mut redis, table_id).await;
-                                format!(
-                                    "Enqueued to table {}\n{}",
-                                    table_id,
-                                    format_queue(&config, &queue)
-                                )
+                                if add_to_queue(&config, &mut redis, table_id, team_id).await {
+                                    let queue = get_queue(&config, &mut redis, table_id).await;
+                                    format!(
+                                        "Enqueued to table {}\n{}",
+                                        table_id,
+                                        format_queue(&config, &queue)
+                                    )
+                                } else {
+                                    "They are already enqueued somewhere!".to_string()
+                                }
                             } else {
                                 "Cannot determine the team of the user".to_string()
                             }
@@ -501,13 +600,53 @@ impl EventHandler for Handler {
                         Some(team) => {
                             let table_id = config.team_table(team);
 
-                            add_to_queue(&config, &mut redis, table_id, team).await;
-                            let queue = get_queue(&config, &mut redis, table_id).await;
-                            format!(
-                                "Enqueued to table {}\n{}",
-                                table_id,
-                                format_queue(&config, &queue)
-                            )
+                            if add_to_queue(&config, &mut redis, table_id, team).await {
+                                let queue = get_queue(&config, &mut redis, table_id).await;
+                                format!(
+                                    "Enqueued to table {}\n{}",
+                                    table_id,
+                                    format_queue(&config, &queue)
+                                )
+                            } else {
+                                "You are already enqueued somewhere!".to_string()
+                            }
+                        }
+                    }
+                }
+                "enqueue_me_faster" => {
+                    let team = config.user_team(command.user.id);
+
+                    match team {
+                        None => "Cannot determine your team. Are you a participant?".to_string(),
+                        Some(team) => {
+                            let table_id = add_to_smallest_queue(&config, &mut redis, team).await;
+                            if let Some(table_id) = table_id {
+                                let queue = get_queue(&config, &mut redis, table_id).await;
+                                format!(
+                                    "Enqueued to table {}\n{}",
+                                    table_id,
+                                    format_queue(&config, &queue)
+                                )
+                            } else {
+                                "You are already enqueued somewhere!".to_string()
+                            }
+                        }
+                    }
+                }
+                "unqueue_me" => {
+                    //
+                    let team = config.user_team(command.user.id);
+
+                    match team {
+                        None => "Cannot determine your team. Are you a participant?".to_string(),
+                        Some(team) => {
+                            let table_id = unqueue(&config, &mut redis, team).await;
+
+                            if let Some(table_id) = table_id {
+                                format!("Successfully unqueued from table {}", table_id)
+                            } else {
+                                "You don't seem to be enqueued!".to_string()
+                            }
                         }
                     }
                 }
