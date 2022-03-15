@@ -1,4 +1,5 @@
 use chrono::Utc;
+use futures::StreamExt;
 use redis::aio::MultiplexedConnection;
 use redis::{from_redis_value, Value};
 use std::collections::{HashMap, HashSet};
@@ -31,16 +32,15 @@ struct Config {
     pub tables: HashMap<i64, ChannelId>,
     pub teams: HashMap<i64, HashSet<UserId>>,
     pub team_names: HashMap<i64, String>,
+    pub user_teams: HashMap<UserId, i64>,
+    pub team_voice_rooms: HashMap<i64, ChannelId>,
     pub participants: HashSet<UserId>,
     pub blessed_users: HashSet<UserId>,
 }
 
 impl Config {
     pub fn user_team(&self, user: UserId) -> Option<i64> {
-        self.teams
-            .iter()
-            .find(|(_, team)| team.contains(&user))
-            .map(|(&team_id, _)| team_id)
+        self.user_teams.get(&user).cloned()
     }
 
     pub fn team_table(&self, team_id: i64) -> i64 {
@@ -102,8 +102,11 @@ async fn table_join(ctx: &Context, team_id: i64, table_id: i64) -> (usize, usize
     let mut people_fail = 0;
     let mut people_in = 0;
     let mut people_out = 0;
-    for u in to_kick {
-        let r = guild.move_member(&ctx, u, neutral_channel).await;
+    for &u in to_kick {
+        let team_id = config.user_team(u).unwrap();
+        let channel = config.team_voice_rooms.get(&team_id).unwrap();
+
+        let r = guild.move_member(&ctx, u, channel).await;
         if let Err(r) = r {
             println!("Failed to kick {} from table {}: {:?}", u, table, r);
             people_fail += 1
@@ -732,15 +735,16 @@ impl TypeMapKey for RedisConnKey {
 
 #[allow(unused)]
 fn prod_config() -> Arc<Config> {
-    let teams = HashMap::from([
-        (DUMMY_TEAM, HashSet::new()),
+    let teams = Vec::from([
+        (DUMMY_TEAM, HashSet::new(), ChannelId(952884153827885117)),
         (
             // волновая что-то там
             1,
             HashSet::from([
                 UserId(418486856410202122), /* ArtemSBulgakov#4366 */
-                UserId(306113516522307587), /*Данил Дубяга#0612 */
+                UserId(306113516522307587), /* Данил Дубяга#0612 */
             ]),
+            ChannelId(951851992093962260),
         ),
         (
             // future gadget
@@ -750,6 +754,7 @@ fn prod_config() -> Arc<Config> {
                 UserId(694190982022955060), /* snowy#9316 */
                 UserId(759419298212216854), /* Сапрыгин Игорь#5994 */
             ]),
+            ChannelId(951879383633772605),
         ),
         (
             // команда Б
@@ -758,15 +763,17 @@ fn prod_config() -> Arc<Config> {
                 UserId(702202171088961556), /* Vladislav#8261 */
                 UserId(885147305831989299), /* Клюкин Александр#6291 */
             ]),
+            ChannelId(951851768680153118),
         ),
         (
             // шелезяка
             4,
             HashSet::from([
-                UserId(301247761209360385), /*lemopsone#1936 */
-                UserId(237181815973085185), /*TVerB#7415 */
-                UserId(365920311688036365), /*Egorushka#3268 */
+                UserId(301247761209360385), /* lemopsone#1936 */
+                UserId(237181815973085185), /* TVerB#7415 */
+                UserId(365920311688036365), /* Egorushka#3268 */
             ]),
+            ChannelId(952185897992990751),
         ),
         (
             // PythonVSc
@@ -776,6 +783,7 @@ fn prod_config() -> Arc<Config> {
                 UserId(504667829463941130), /* ivanmironov#0735 */
                 UserId(690915090999935056), /* Тимур Ступин#6393 */
             ]),
+            ChannelId(951879222224367656),
         ),
         (
             // team gazebo
@@ -785,6 +793,7 @@ fn prod_config() -> Arc<Config> {
                 UserId(934479210590908459), /* Матвеев Роман Н#9716 */
                 UserId(606083910602063872), /* Vadik prog#2484 */
             ]),
+            ChannelId(952071024369872896),
         ),
         (
             // team skills building
@@ -794,6 +803,7 @@ fn prod_config() -> Arc<Config> {
                 UserId(696261215873400862), /* whatis_love#2776 */
                 UserId(691935292604809236), /* Туркия Георгий#6249 */
             ]),
+            ChannelId(952185981413507082),
         ),
         (
             // team name
@@ -803,23 +813,26 @@ fn prod_config() -> Arc<Config> {
                 UserId(492763298333196298), /* RobotoLev#0880 */
                 UserId(577939594822025229), /* Ver_Nick#8335 */
             ]),
+            ChannelId(951879112933400676),
         ),
         (
             // безынтиллектуальная
             9,
             HashSet::from([
-                UserId(559926713346162688), /*Kiri111enz#6813 */
-                UserId(461761081539428363), /*GuestKP#4577 */
+                UserId(559926713346162688), /* Kiri111enz#6813 */
+                UserId(461761081539428363), /* GuestKP#4577 */
                 UserId(441870970895073300), /* Raz0ne#5454 */
             ]),
+            ChannelId(951851550081429514),
         ),
         (
             // ушки газебы
             10,
             HashSet::from([
                 UserId(543072830552801280), /* MaksimZuykov#3498 */
-                UserId(568165784719982604), /*Эмиль Давлитьяров#1622 */
+                UserId(568165784719982604), /* Эмиль Давлитьяров#1622 */
             ]),
+            ChannelId(951852461604356147),
         ),
         (
             // closedcv
@@ -828,11 +841,13 @@ fn prod_config() -> Arc<Config> {
                 UserId(510848390981222400), /* Краснов Андрей Алексеевич#0677 */
                 UserId(534011922534629386), /* Ростов Николай#7461 */
             ]),
+            ChannelId(952188351295926302),
         ),
         (
             // [REDACTED]
             12,
             HashSet::from([]),
+            ChannelId(952884153827885117),
         ),
     ]);
 
@@ -845,8 +860,13 @@ fn prod_config() -> Arc<Config> {
             (1, ChannelId(952984861306662942)),
             (2, ChannelId(952984899734868048)),
         ]),
-        participants: teams.iter().flat_map(|f| f.1).cloned().collect(),
-        teams,
+        participants: teams.iter().flat_map(|f| f.1.clone()).collect(),
+        teams: teams.iter().map(|(k, v, _)| (*k, v.clone())).collect(),
+        user_teams: teams
+            .iter()
+            .flat_map(|(team, uu, _)| uu.iter().map(|u| (*u, *team)))
+            .collect(),
+        team_voice_rooms: teams.iter().map(|(k, _, r)| (*k, *r)).collect(),
         team_names: HashMap::from([
             (DUMMY_TEAM, "Dummy team".to_string()),
             (1, "Волновая Интерференция".to_string()),
@@ -903,6 +923,25 @@ fn test_config() -> Arc<Config> {
         ]),
         participants: teams.iter().flat_map(|f| f.1).cloned().collect(),
         teams,
+        user_teams: HashMap::from([
+            (UserId(352172373774041102), 1),
+            (UserId(246300672734003211), 2),
+        ]),
+        team_voice_rooms: HashMap::from([
+            (DUMMY_TEAM, ChannelId(452137106609799168)),
+            (1, ChannelId(953387785845358602)),
+            (2, ChannelId(953387949540638880)),
+            (3, ChannelId(452137106609799168)),
+            (4, ChannelId(452137106609799168)),
+            (5, ChannelId(452137106609799168)),
+            (6, ChannelId(452137106609799168)),
+            (7, ChannelId(452137106609799168)),
+            (8, ChannelId(452137106609799168)),
+            (9, ChannelId(452137106609799168)),
+            (10, ChannelId(452137106609799168)),
+            (11, ChannelId(452137106609799168)),
+            (12, ChannelId(452137106609799168)),
+        ]),
         team_names: HashMap::from([
             (DUMMY_TEAM, "Dummy team".to_string()),
             (1, "team nikita".to_string()),
