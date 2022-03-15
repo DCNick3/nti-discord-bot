@@ -24,6 +24,7 @@ struct Config {
     pub guild_id: GuildId,
     pub tables: HashMap<i64, ChannelId>,
     pub teams: HashMap<i64, Vec<UserId>>,
+    pub team_names: HashMap<i64, String>,
     pub participants: HashSet<UserId>,
     pub blessed_users: HashSet<UserId>,
 }
@@ -33,7 +34,7 @@ struct General;
 
 struct Handler;
 
-async fn table_join(ctx: &Context, team_id: i64, table_id: i64) -> (usize, usize) {
+async fn table_join(ctx: &Context, team_id: i64, table_id: i64) -> (usize, usize, usize) {
     let data = ctx.data.read().await;
     let config = data.config();
     let voice = data.voice_state();
@@ -65,18 +66,29 @@ async fn table_join(ctx: &Context, team_id: i64, table_id: i64) -> (usize, usize
         .filter(|f| config.participants.contains(f) && !team.contains(f));
     let to_join = team.iter().filter(|f| !members.contains(f));
 
+    let mut people_fail = 0;
     let mut people_in = 0;
     let mut people_out = 0;
     for u in to_kick {
-        people_out += 1;
-        guild.move_member(&ctx, u, neutral_channel).await.unwrap();
+        let r = guild.move_member(&ctx, u, neutral_channel).await;
+        if let Err(r) = r {
+            println!("Failed to kick {} from table {}: {:?}", u, table, r);
+            people_fail += 1
+        } else {
+            people_out += 1;
+        }
     }
     for u in to_join {
-        people_in += 1;
-        guild.move_member(&ctx, u, table).await.unwrap();
+        let r = guild.move_member(&ctx, u, table).await;
+        if let Err(r) = r {
+            println!("Failed to join {} to table {}: {:?}", u, table, r);
+            people_fail += 1
+        } else {
+            people_in += 1;
+        }
     }
 
-    (people_in, people_out)
+    (people_in, people_out, people_fail)
 }
 
 // #[async_trait]
@@ -129,11 +141,18 @@ impl EventHandler for Handler {
                             .create_option(|option| {
                                 option
                                     .name("team_id")
-                                    .description("Team id (0-10)")
+                                    .description("Team id (1-12)")
                                     .kind(ApplicationCommandOptionType::Integer)
-                                    .min_int_value(0)
-                                    .max_int_value(10)
-                                    .required(true)
+                                    .min_int_value(1)
+                                    .max_int_value(12)
+                                    .required(true);
+                                for i in 1..12 {
+                                    option.add_int_choice(
+                                        config.team_names.get(&i).unwrap(),
+                                        i as i32,
+                                    );
+                                }
+                                option
                             })
                     })
                     .create_application_command(|command| {
@@ -258,9 +277,12 @@ impl EventHandler for Handler {
                         let table_id = table_id.value.unwrap().as_i64().unwrap();
                         let team_id = team_id.value.unwrap().as_i64().unwrap();
 
-                        let (in_, out) = table_join(&ctx, team_id, table_id).await;
+                        let (in_, out, err) = table_join(&ctx, team_id, table_id).await;
 
-                        format!("Done! {} people in, {} people out", in_, out)
+                        format!(
+                            "Done! {} people in, {} people out, {} people failed",
+                            in_, out, err
+                        )
                     } else {
                         "You should be blessed by the gods to do this".to_string()
                     }
@@ -273,9 +295,12 @@ impl EventHandler for Handler {
                         };
                         let table_id = table_id.value.unwrap().as_i64().unwrap();
 
-                        let (in_, out) = table_join(&ctx, DUMMY_TEAM, table_id).await;
+                        let (in_, out, err) = table_join(&ctx, DUMMY_TEAM, table_id).await;
 
-                        format!("Done! {} people in, {} people out", in_, out)
+                        format!(
+                            "Done! {} people in, {} people out, {} people failed",
+                            in_, out, err
+                        )
                     } else {
                         "You should be blessed by the gods to do this".to_string()
                     }
@@ -311,13 +336,150 @@ impl TypeMapKey for TableVoiceState {
     type Value = Self;
 }
 
-#[tokio::main]
-async fn main() {
+#[allow(unused)]
+fn prod_config() -> Arc<Config> {
     let teams = HashMap::from([
         (DUMMY_TEAM, Vec::new()),
-        (0, Vec::from([UserId(352172373774041102) /* DCNick3 */])),
-        (1, Vec::new()),
-        (2, Vec::new()),
+        (
+            // волновая что-то там
+            1,
+            Vec::from([
+                UserId(418486856410202122), /* ArtemSBulgakov#4366 */
+                UserId(306113516522307587), /*Данил Дубяга#0612 */
+            ]),
+        ),
+        (
+            // future gadget
+            2,
+            Vec::from([
+                UserId(531852139262377984), /* Vekshin Arseny#8438 */
+                UserId(694190982022955060), /* snowy#9316 */
+                UserId(759419298212216854), /* Сапрыгин Игорь#5994 */
+            ]),
+        ),
+        (
+            // команда Б
+            3,
+            Vec::from([
+                UserId(702202171088961556), /* Vladislav#8261 */
+                UserId(885147305831989299), /* Клюкин Александр#6291 */
+            ]),
+        ),
+        (
+            // шелезяка
+            4,
+            Vec::from([
+                UserId(301247761209360385), /*lemopsone#1936 */
+                UserId(237181815973085185), /*TVerB#7415 */
+                UserId(365920311688036365), /*Egorushka#3268 */
+            ]),
+        ),
+        (
+            // PythonVSc
+            5,
+            Vec::from([
+                UserId(900079911056855040), /* Гутор Елизавета#3990 */
+                UserId(504667829463941130), /* ivanmironov#0735 */
+                UserId(690915090999935056), /* Тимур Ступин#6393 */
+            ]),
+        ),
+        (
+            // team gazebo
+            6,
+            Vec::from([
+                UserId(640621404148203566), /* Fet#5017 */
+                UserId(492763298333196298), /* Матвеев Роман Н#9716 */
+                UserId(577939594822025229), /* Vadik prog#2484 */
+            ]),
+        ),
+        (
+            // team skills building
+            7,
+            Vec::from([
+                UserId(690896591648981003), /* Savin_Anatolyi#9726 */
+                UserId(696261215873400862), /* whatis_love#2776 */
+                UserId(691935292604809236), /* Туркия Георгий#6249 */
+            ]),
+        ),
+        (
+            // team name
+            8,
+            Vec::from([
+                UserId(640621404148203566), /* Keine Ratte#0920 */
+                UserId(492763298333196298), /* RobotoLev#0880 */
+                UserId(577939594822025229), /* Ver_Nick#8335 */
+            ]),
+        ),
+        (
+            // безынтиллектуальная
+            9,
+            Vec::from([
+                UserId(559926713346162688), /*Kiri111enz#6813 */
+                UserId(461761081539428363), /*GuestKP#4577 */
+                UserId(441870970895073300), /* Raz0ne#5454 */
+            ]),
+        ),
+        (
+            // ушки газебы
+            10,
+            Vec::from([
+                UserId(543072830552801280), /* MaksimZuykov#3498 */
+                UserId(568165784719982604), /*Эмиль Давлитьяров#1622 */
+            ]),
+        ),
+        (
+            // closedcv
+            11,
+            Vec::from([
+                UserId(510848390981222400), /* Краснов Андрей Алексеевич#0677 */
+                UserId(534011922534629386), /* Ростов Николай#7461 */
+            ]),
+        ),
+        (
+            // [REDACTED]
+            12,
+            Vec::from([]),
+        ),
+    ]);
+
+    Arc::new(Config {
+        token: include_str!("discord_token.txt").to_string(),
+        app_id: 952960685787193374,
+        guild_id: GuildId(951447764837990400),
+        tables: HashMap::from([
+            (DUMMY_TABLE, ChannelId(952884153827885117)),
+            (1, ChannelId(952984861306662942)),
+            (2, ChannelId(952984899734868048)),
+        ]),
+        participants: teams.iter().flat_map(|f| f.1).cloned().collect(),
+        teams,
+        team_names: HashMap::from([
+            (DUMMY_TEAM, "Dummy team".to_string()),
+            (1, "Волновая Интерференция".to_string()),
+            (2, "Future Gadget Lab v4".to_string()),
+            (3, "КомандаБ".to_string()),
+            (4, "Шелезяка".to_string()),
+            (5, "PythonVSc--".to_string()),
+            (6, "Gazebo one love".to_string()),
+            (7, "Skills Building".to_string()),
+            (8, "team-name".to_string()),
+            (9, "Безынтеллектуальные человеческие единицы".to_string()),
+            (10, "Ушки Газебы".to_string()),
+            (11, "ClosedCV".to_string()),
+            (12, "[REDACTED]".to_string()),
+        ]),
+        blessed_users: HashSet::from([
+            UserId(352172373774041102), /* DCNick3 */
+            UserId(246300672734003211), /* Vyacheslav */
+        ]),
+    })
+}
+#[allow(unused)]
+fn test_config() -> Arc<Config> {
+    let teams = HashMap::from([
+        (DUMMY_TEAM, Vec::new()),
+        (1, Vec::from([UserId(352172373774041102) /* DCNick3 */])),
+        (2, Vec::from([UserId(246300672734003211)] /* Vyacheslav */)),
         (3, Vec::new()),
         (4, Vec::new()),
         (5, Vec::new()),
@@ -326,9 +488,11 @@ async fn main() {
         (8, Vec::new()),
         (9, Vec::new()),
         (10, Vec::new()),
+        (11, Vec::new()),
+        (12, Vec::new()),
     ]);
 
-    let config = Arc::new(Config {
+    Arc::new(Config {
         token: include_str!("discord_token.txt").to_string(),
         app_id: 952960685787193374,
         guild_id: GuildId(377441849134284812),
@@ -339,8 +503,31 @@ async fn main() {
         ]),
         participants: teams.iter().flat_map(|f| f.1).cloned().collect(),
         teams,
-        blessed_users: HashSet::from([UserId(352172373774041102) /* DCNick3 */]),
-    });
+        team_names: HashMap::from([
+            (DUMMY_TEAM, "Dummy team".to_string()),
+            (1, "team nikita".to_string()),
+            (2, "team slava".to_string()),
+            (3, "team 3".to_string()),
+            (4, "team 4".to_string()),
+            (5, "team 5".to_string()),
+            (6, "team 6".to_string()),
+            (7, "team 7".to_string()),
+            (8, "team 8".to_string()),
+            (9, "team 9".to_string()),
+            (10, "team 10".to_string()),
+            (11, "team 11".to_string()),
+            (12, "team 12".to_string()),
+        ]),
+        blessed_users: HashSet::from([
+            UserId(352172373774041102), /* DCNick3 */
+            UserId(246300672734003211), /* Vyacheslav */
+        ]),
+    })
+}
+
+#[tokio::main]
+async fn main() {
+    let config = test_config();
 
     let framework = StandardFramework::new().group(&GENERAL_GROUP);
 
