@@ -1,5 +1,4 @@
 use chrono::Utc;
-use futures::StreamExt;
 use redis::aio::MultiplexedConnection;
 use redis::{from_redis_value, Value};
 use std::collections::{HashMap, HashSet};
@@ -82,7 +81,6 @@ async fn table_join(ctx: &Context, team_id: i64, table_id: i64) -> (usize, usize
         .cloned()
         .collect();
     let table = config.tables.get(&table_id).cloned().unwrap();
-    let neutral_channel = config.tables.get(&DUMMY_TABLE).unwrap();
 
     // for u in team.iter() {
     //     guild.move_member(&ctx, u, table).await.unwrap();
@@ -991,7 +989,7 @@ async fn main() {
     let con = redis_client
         .get_multiplexed_tokio_connection()
         .await
-        .unwrap();
+        .expect("Connecting to redis");
 
     {
         let mut data = client.data.write().await;
