@@ -791,7 +791,7 @@ fn prod_config() -> Arc<Config> {
                 UserId(934479210590908459), /* Матвеев Роман Н#9716 */
                 UserId(606083910602063872), /* Vadik prog#2484 */
             ]),
-            ChannelId(952071024369872896),
+            ChannelId(952185828136865793),
         ),
         (
             // team skills building
