@@ -664,9 +664,11 @@ impl EventHandler for Handler {
                         if let Some(team_id) = team_id {
                             let (in_, out, err) = table_join(&ctx, team_id, table_id).await;
 
+                            let team_name = config.team_names.get(&team_id).unwrap();
+
                             format!(
-                                "Deqeued team {} -> table {}: {} people in, {} people out, {} people failed",
-                                team_id, table_id, in_, out, err
+                                "Deqeued team {} -> table {}: {} people in, {} people out, {} people failed\n{}",
+                                team_id, table_id, in_, out, err, team_name
                             )
                         } else {
                             format!("The queue for table {} is empty", table_id)
