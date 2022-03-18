@@ -9,6 +9,7 @@ use std::sync::Arc;
 use serenity::async_trait;
 use serenity::builder::CreateApplicationCommandOption;
 use serenity::client::{Client, Context, EventHandler};
+
 use serenity::framework::standard::{macros::group, StandardFramework};
 use serenity::model::gateway::Ready;
 use serenity::model::guild::Guild;
@@ -402,6 +403,10 @@ impl EventHandler for Handler {
                             .description("Dequeue the team from the specified table queue, but do NOT move them to the table")
                             .create_option(table_option)
                     })
+                    .create_application_command(|command| {
+                        command.name("seppuku")
+                            .description("F")
+                    })
             })
             .await
             .unwrap();
@@ -696,6 +701,7 @@ impl EventHandler for Handler {
                         "You should be blessed by the gods to do this".to_string()
                     }
                 }
+                "seppuku" => "Ня. Пока.".to_string(),
                 _ => "not implemented :(".to_string(),
             };
 
